@@ -24,7 +24,6 @@ FIREFOX="/usr/bin/firefox --new-tab"
 MV="/bin/mv"
 TOUCH="/usr/bin/touch"
 YT="/usr/bin/yt-dlp"
-# YT="/usr/local/bin/youtube-dl"
 YTURL="https://youtu.be"
 WGET="/usr/bin/wget"
 YAD="/usr/bin/yad --selectable-labels --center"
@@ -62,7 +61,7 @@ fi
 
 if [[ ! "$DIR" ]]
 then
-   DIR="$HOME/FakeNews/Media"
+   DIR="$HOME/Your/Dir"
 fi
 
 DIALOG=$($YAD --width=500 --title "Enter id/url" --form \
