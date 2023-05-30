@@ -2,8 +2,17 @@
 A BASH Script to Download mp4, poster-image + captions for YT videos
 
 ## *Basics*
-This script file is designed for use by any-user (no root access required) within a Terminal. It’s principal purpose is to make it easy & reliable to download video, poster + captions for a desired YT video. It has been used under *Devuan* (a systemD-free version of *Debian*). In addition to BASH, the main utilities required are common items such as FFMPEG & TOUCH + the uncommon item YAD (*“Yet Another Dialog”*, described as a *“tool for creating graphical dialogs from shell scripts”*).
+This script file is designed for use by any-user (no root access required) within a Terminal. It’s principal purpose is to make it easy & reliable to download video, poster + captions for a desired YT video. It has been used under *Devuan* (a systemD-free version of *Debian*). In addition to BASH, the main utilities required are common items such as FFMPEG & TOUCH + the uncommon item YAD (*“Yet Another Dialog”*, described as a *“tool for creating graphical dialogs from shell scripts”*) + FIREFOX.
 
+The main item to change is line 64 (change to a sitable directory):
+
+```bash
+if [[ ! "$DIR" ]]
+then
+   DIR="$HOME/Your/Dir"
+fi
+
+```
 ## *Extra*
 The script interchanges between command-line & a YAD dialog. This dialog is vital in the 2nd part in choosing the precise variant of video to download.
 
