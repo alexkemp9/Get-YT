@@ -24,3 +24,11 @@ $ chmod 0700 ~/.local/sbin/getYT
 $ la ~/.local/sbin/getYT
 -rwx------ 1 user user 17461 14783 Apr  6  2022 /home/user/.local/sbin/getYT
 ```
+If the file is opened without any parameters, this is the dialog that you will see:
+
+![dialog1](https://github.com/alexkemp9/Get-YT/blob/main/Screenshot_2023-05-30_17-17-20.png)
+
+(you forgot to change line#64, did you not?)
+
+Choosing now one of my videos (at https://youtu.be/9RLe2vDv6s0) & filling in the blanks gives the second dialog:
+
