@@ -1,0 +1,455 @@
+#!/bin/bash
+#
+# ~/.local/sbin/getYT
+#
+# download mp4, poster-image + captions for YouTube videos
+#
+# 2022-01-20 switched from youtube-dl to yt-dlp (due to slow downloads problem)
+# 2021-07-11 retain mp4a file for mp3 audio-only
+# 2021-02-19 added YT 1440p + 2160p options
+# 2018-12-12 added '--playlist-items 1' to try to cope with C-SPAN video playlists
+#           (deleted - does not work with non C-SPAN)
+# 2018-11-12 added generic option for when provided format not in this script
+# 2018-10-04 speedup in getting metadata
+# 2018-09-24 made hls format generic collect (bloody painful)
+# 2018-09-17 added c-span formats + error colours
+# 2018-09-09 changes for mp3 production
+# 2018-09-08 fix ID with leading dash problem ('-')
+# 2018-08-30 started
+
+NOTFOUND=66
+
+FFMPEG="/usr/bin/ffmpeg -loglevel warning -hide_banner"
+FIREFOX="/usr/bin/firefox --new-tab"
+MV="/bin/mv"
+TOUCH="/usr/bin/touch"
+YT="/usr/bin/yt-dlp"
+# YT="/usr/local/bin/youtube-dl"
+YTURL="https://youtu.be"
+WGET="/usr/bin/wget"
+YAD="/usr/bin/yad --selectable-labels --center"
+
+YTID=$1
+FILE=$2
+DIR=$3
+MP='mp4'
+ERR_COL="/bin/echo -ne \e[0;31;40m"
+RESET_COL="tput sgr0"
+
+if [[ $YTID =~ ^http ]]
+then
+   URL="$YTID"
+else                      # assume is bare id for YT; add YT url to make safe
+   URL="$YTURL/$YTID"     # (YAD hiccups on leading dashes within parameters)
+fi
+
+if [[ $URL =~ youtu.be || $URL =~ youtube.com ]]
+then                      # is youtube within $URL
+   WHO=0
+else                      # not youtube within $URL
+   WHO=1
+fi;
+
+if [[ ${FILE##*.} == 'mp4' ]]
+then                      # file extension is mp4
+   FILE=${FILE%.*}        # remove extension + '.'
+fi
+if [[ ${FILE##*.} == 'mp3' ]]
+then                      # file extension is mp3
+   MP='mp3'
+   FILE=${FILE%.*}        # remove extension + '.'
+fi
+
+if [[ ! "$DIR" ]]
+then
+   DIR="$HOME/FakeNews/Media"
+fi
+
+DIALOG=$($YAD --width=500 --title "Enter id/url" --form \
+		--field="Remote URL:"         "$URL" \
+		--field="Filename stub:"      "$FILE" \
+      --field="Store in directory:" "$DIR"  \
+)
+
+URL=$(echo $DIALOG  | awk 'BEGIN {FS="|" } { print $1 }')
+NAME=$(echo $DIALOG | awk 'BEGIN {FS="|" } { print $2 }')
+DIR=$(echo $DIALOG  | awk 'BEGIN {FS="|" } { print $3 }')
+
+if [[ $URL == '' ]]
+then                      # cancel pressed?
+   $ERR_COL
+	echo -n "Error! \$URL is empty "
+	$RESET_COL
+	echo "(Cancel pressed?); exiting…"
+   exit 1
+fi
+if [[ ${NAME##*.} == 'mp4' ]]
+then                      # file extension is mp4
+   NAME=${NAME%.*}        # remove extension + '.'
+   MP='mp4'
+fi
+if [[ ${NAME##*.} == 'mp3' ]]
+then                      # file extension is mp3
+   MP='mp3'
+   NAME=${NAME%.*}        # remove extension + '.'
+fi
+
+if [ -s "$DIR/$NAME.$MP" ] # the mp4/mp3 file already exists
+then
+  echo "“$DIR/$NAME.$MP” already exists;"
+  echo "Script finishes here"
+  exit 1
+fi
+
+echo -n "Accessing remote site, please wait…"
+
+# echo -n " Getting Poster url…"; POSTER=$("$YT" --get-thumbnail "$URL") # the URL for the poster img
+# if [[ $? > 0 ]]; then $ERR_COL; echo -n "Error $? whilst getting Poster url; "; $RESET_COL; echo "exiting…"; exit 1; fi;
+#                                 IMAGE=${POSTER##*/}
+# echo -n " Title…";              TITLE=$("$YT" --get-title "$URL")
+# if [[ $? > 0 ]]; then $ERR_COL; echo -n "Error $? whilst getting Title; ";      $RESET_COL; echo "exiting…"; exit 1; fi;
+# echo -n " Duration…";           DUR=$("$YT" --get-duration "$URL")
+# if [[ $? > 0 ]]; then $ERR_COL; echo -n "Error $? whilst getting Duration; ";   $RESET_COL; echo "exiting…"; exit 1; fi;
+echo -n " Getting Poster url… Title… Duration…";
+TMP=$("$YT" --get-thumbnail --get-title --get-duration "$URL")
+if [[ $? > 0 ]]; then $ERR_COL; echo -n "Error $? whilst getting Poster,Title+Duration; ";      $RESET_COL; echo "exiting…"; exit 1; fi;
+IFS=$'\n' read -rd '' -a B <<< "$TMP";
+POSTER=${B[1]}; IMAGE=${POSTER##*/}
+TITLE=${B[0]}
+DUR=${B[2]}
+echo -n " Formats…";            TMP=$("$YT" --list-formats "$URL")     # put available formats into $TMP
+if [[ $? > 0 ]]; then $ERR_COL; echo -n "Error $? whilst getting Formats; ";    $RESET_COL; echo "exiting…"; exit 1; fi;
+IFS=$'\n' read -rd '' -a A <<< "$TMP"; # read each line as an array into $A
+echo ""
+
+# bare '&' not allowed within Text elements in yad
+TITLE=${TITLE//&/&amp;}
+
+j=0
+re="*mp4*"
+for i in "${!A[@]}"
+do
+   if [[ ${A[i]} == $re ]]  # $re is within the line
+	then
+	   CHOICE[j]=${A[i]%% *} # selection code for checkbox
+		j=$((j+1))
+   fi
+done
+
+# yad reacts badly to empty variables within it's command-line
+# it also splits on spaces on expansion, ignoring all quoting
+# hence all space below after 'FALSE ' are utf8 nbsp
+# youtube
+fGeneric='FALSE generic -give it the best shot we can-'
+f140='FALSE 140 -not available-'
+f160='FALSE 160 -not available-'
+f133='FALSE 133 -not available-'
+f134='FALSE 134 -not available-'
+f135='FALSE 135 -not available-'
+f136='FALSE 136 -not available-'
+f137='FALSE 137 -not available-'
+f400='FALSE 400 -not available-'
+f401='FALSE 401 -not available-'
+f18='FALSE 18  -not available-'
+f22='FALSE 22  -not available-'
+# c-span
+f224_234p='FALSE 224-234p  -not available-'
+f628_360p='FALSE 628-360p  -not available-'
+f4000_576p='FALSE 4000-576p -not available-'
+# hls formats
+video_240p='FALSE video_240p -not available-'
+video_240p_mp4=''
+video_360p='FALSE video_360p -not available-'
+video_360p_mp4=''
+video_480p='FALSE video_480p -not available-'
+video_480p_mp4=''
+video_720p='FALSE video_720p -not available-'
+video_720p_mp4=''
+video_1080p='FALSE video_1080p -not available-'
+video_1080p_mp4=''
+# 240p
+# 360p
+hls_xxx='FALSE hls-xxx -not available-'
+# 480p
+# 720p
+# 1080p
+hls_xxxx='FALSE hls-xxxx -not available-'
+# you-tube
+if echo ${CHOICE[@]} | grep -qE '\b140\b'; then
+   f140='FALSE 140 m4a audio only DASH audio, m4a_dash container, mp4a.40.2@128k'
+fi
+if echo ${CHOICE[@]} | grep -qE '\b160\b'; then
+   f160='FALSE 160 mp4 256x144   144p,  avc1.4d400c, video only'
+fi
+if echo ${CHOICE[@]} | grep -qE '\b133\b'; then
+   f133='FALSE 133 mp4 426x240   240p,  avc1.4d4015, video only'
+fi
+if echo ${CHOICE[@]} | grep -qE '\b134\b'; then
+   f134='FALSE 134 mp4 640x360   360p,  avc1.4d401e, video only'
+fi
+if echo ${CHOICE[@]} | grep -qE '\b135\b'; then
+   f135='FALSE 135 mp4 854x480   480p,  avc1.4d401e, video only'
+fi
+if echo ${CHOICE[@]} | grep -qE '\b136\b'; then
+   f136='FALSE 136 mp4 1280x720  720p,  avc1.4d401f, video only'
+fi
+if echo ${CHOICE[@]} | grep -qE '\b137\b'; then
+   f137='FALSE 137 mp4 1920x1080 1080p, avc1.640028, video only'
+fi
+if echo ${CHOICE[@]} | grep -qE '\b400\b'; then
+   f400='FALSE 400 mp4 2560x1440 1440p, av01.0.12M.08, video only'
+fi
+if echo ${CHOICE[@]} | grep -qE '\b400\b'; then
+   f401='FALSE 401 mp4 3840x2160 2160p, av01.0.12M.08, video only'
+fi
+if echo ${CHOICE[@]} | grep -qE '\b18\b'; then
+   f18='FALSE 18  mp4 640x360  medium-420p, avc1.42001E, mp4a.40.2@ 96k'
+fi
+if echo ${CHOICE[@]} | grep -qE "22$"; then
+   f22='FALSE 22  mp4 1280x720  hd720, avc1.64001F, mp4a.40.2@192k'
+fi
+# c-span
+if echo ${CHOICE[@]} | grep -qE '\b224-234p\b'; then
+   f224_234p='FALSE 224-234p     mp4        234p        224k'
+fi
+if echo ${CHOICE[@]} | grep -qE '\b4000-576p\b'; then
+   f628_360p='FALSE 628-360p     mp4        360p        628k'
+fi
+if echo ${CHOICE[@]} | grep -qE '\b628-360p\b'; then
+   f4000_576p='FALSE 4000-576p    mp4        576p       4000k'
+fi
+# hls formats
+# the format string varies wildly; there are two sets of groupings:-
+#1 'FALSE video_480p_mp4  854x480   0k h264, video only'
+#2 'hls-1457    854x480  avc1.4d401f, mp4a.40.2'
+#1 has 2 sets of formats
+#2 always begins with 'hls-' then is '123' or '1234' (actual value varies continuously)
+# we use a mid-range format to decide if they exist at all, and then switch between values
+if echo ${CHOICE[@]} | grep -qF 'video_480p'; then
+   if echo ${CHOICE[@]} | grep -qE '\bvideo_240p_mp4\b'
+   then
+         video_240p=''
+     video_240p_mp4='FALSE video_240p_mp4  426x240   0k h264, video only'
+   else
+      if echo ${CHOICE[@]} | grep -qE '\bvideo_240p\b'
+      then
+         video_240p='FALSE video_240p    426x240     0k h264, video only'
+     video_240p_mp4=''
+   fi fi
+   if echo ${CHOICE[@]} | grep -qE '\bvideo_360p_mp4\b'
+   then
+         video_360p=''
+     video_360p_mp4='FALSE video_360p_mp4  640x360   0k h264, video only'
+   else
+      if echo ${CHOICE[@]} | grep -qE '\bvideo_360p\b'
+      then
+         video_360p='FALSE video_360p    640x360     0k h264, video only'
+     video_360p_mp4=''
+   fi fi
+   if echo ${CHOICE[@]} | grep -qE '\bvideo_480p_mp4\b'
+   then
+         video_480p=''
+     video_480p_mp4='FALSE video_480p_mp4  854x480   0k h264, video only'
+   else
+      if echo ${CHOICE[@]} | grep -qE '\bvideo_480p\b'
+      then
+         video_480p='FALSE video_480p    854x480     0k h264, video only'
+     video_480p_mp4=''
+   fi fi
+   if echo ${CHOICE[@]} | grep -qE '\bvideo_720p_mp4\b'
+   then
+         video_720p=''
+     video_720p_mp4='FALSE video_720p_mp4  1280x720  0k h264, video only'
+   else
+      if echo ${CHOICE[@]} | grep -qE '\bvideo_720p\b'
+      then
+         video_720p='FALSE video_720p   1280x720     0k h264, video only'
+     video_720p_mp4=''
+   fi fi
+   if echo ${CHOICE[@]} | grep -qE '\bvideo_1080p_mp4\b'
+   then
+        video_1080p=''
+    video_1080p_mp4='FALSE video_1080p_mp4 1920x1080 0k h264, video only'
+   else
+      if echo ${CHOICE[@]} | grep -qE '\video_1080p\b'
+      then
+        video_1080p='FALSE video_1080p  1920x1080    0k h264, video only'
+    video_1080p_mp4=''
+   fi fi
+   # discover what hls choices are available
+   # we need to examine entire lines & not just the format codes
+
+   j=0
+   RE="hls-*"
+   p240="*426x240*"    # 240p
+   p360="*640x360*"    # 360p
+   p480="*854x480*"    # 480p
+   p720="*1280x720*"   # 720p
+   p1080="*1920x1080*" # 1080p
+   for i in "${!A[@]}"
+   do
+      if [[ ${A[i]} == $RE ]]  # it is an hls format line
+      then
+         HLS=${A[i]%% *} # selection code for checkbox
+         # which format is it?
+         if [[ ${A[i]} == $p240 ]]
+         then
+            hls="FALSE $HLS    426x240  avc1.4d401f, mp4a.40.2"
+            hls_xxx=''
+            HLS_FORMAT[j]=$hls
+         elif [[ ${A[i]} == $p360 ]]
+         then
+            hls="FALSE $HLS    640x360  avc1.4d401f, mp4a.40.2"
+            hls_xxx=''
+            HLS_FORMAT[j]=$hls
+         elif [[ ${A[i]} == $p480 ]]
+         then
+            hls="FALSE $HLS   854x480  avc1.4d401f, mp4a.40.2"
+            hls_xxxx=''
+            HLS_FORMAT[j]=$hls
+         elif [[ ${A[i]} == $p720 ]]
+         then
+            hls="FALSE $HLS  1280x720  avc1.4d401f, mp4a.40.2"
+            hls_xxxx=''
+            HLS_FORMAT[j]=$hls
+         elif [[ ${A[i]} == $p1080 ]]
+         then
+            hls="FALSE $HLS  1920x1080 avc1.4d401f, mp4a.40.2"
+            hls_xxxx=''
+            HLS_FORMAT[j]=$hls
+         fi
+         j=$((j+1))
+      fi
+   done
+fi
+
+DIALOG=$($YAD --title "Choose AV Resolution" --height=600 --width=800 --text="$MP title: $TITLE\n$MP duration: $DUR\nSave as: “$DIR/$NAME.$MP”\n\nChoose min:1, max:2 formats for mp4/m4a" \
+ --list --checklist --column "Format" --column "Description:TEXT" \
+$f140 $f160 $f133 $f134 $f135 $f136 $f137 $f400 $f401 $f18 $f22 \
+$f224_234p $f628_360p $f4000_576p \
+$video_240p     $video_360p     $video_480p     $video_720p     $video_1080p     \
+$video_240p_mp4 $video_360p_mp4 $video_480p_mp4 $video_720p_mp4 $video_1080p_mp4 \
+$hls_xxx $hls_xxxx \
+${HLS_FORMAT[@]} \
+$fGeneric )
+if [ ! $? ] # cancel, error, etc. ('OK' is zero, which is TRUE)
+then
+   echo "Exit status is $?"
+	exit 1
+fi
+
+# if 2 formats, first must contain the video
+V=$(echo $DIALOG | awk 'BEGIN {FS="|" } { print $4 }')
+if [ -n "$V" ] # str not null
+then           # 2 format str
+   AV=${V%% *}
+else           # 1 format str
+   AV=''
+fi
+
+A=$(echo $DIALOG | awk 'BEGIN {FS="|" } { print $2 }')
+if [ -z "$AV" ]   # $AV is zero-length/null
+then              # 1xformat str
+   AV="${A%% *}"
+   if [[ $AV == '140' ]]
+	then
+	   MP='m4a'
+	else
+      if [[ $AV == 'generic' ]]
+		then
+		   AV='mp4' # use generic format (gives 'mp4 best')
+		fi
+	fi
+else              # 2xformat str
+   if [ -n "$A" ]
+   then
+      AV="$AV+${A%% *}"
+   fi
+fi
+
+# paranoia setting
+if [ -z "$AV" ]
+then
+   echo "Exiting on null-string (\$AV; ‘Cancel’ pressed?)"
+	exit 1
+fi
+# create mp4/mp3 file
+echo "Creating $MP file…"
+$YT --output "$DIR/$NAME.$MP" --format $AV $URL
+# 2020-08-18 original test of "if [ ! $? ]" failed on http refusal; try again
+retVal=$?
+if [ $retVal -ne 0 ]
+then
+   echo "Problems getting $MP; error-code: $?"
+	exit 1
+fi
+
+# create poster image
+echo "Getting best-res poster image…"
+$WGET $POSTER
+if [ $? ]
+then
+   if ! $MV "./$IMAGE" "$DIR/$NAME.jpg"
+	then
+	   echo "(exiting)"
+	fi
+else
+   echo "Problems getting image file; error-code: $?"
+fi
+$FIREFOX "$DIR/$NAME.jpg"
+
+if [[ $MP == 'mp4' ]]
+then
+   # create subtitle/captions - mp4 file only
+   if [[ $WHO > 0 ]]
+   then	       # is not YT
+      EXT='ttml' # conversion to .srt often fails
+      WRITE='--write-sub'
+      WHAT='Subtitles'
+      echo "Getting subtitles…"
+   else
+      # only YT has auto-written captions
+      EXT='vtt'
+      WRITE='--write-auto-sub'
+      WHAT='Captions'
+      echo "Getting captions…"
+   fi
+
+   $YT --skip-download $WRITE --all-subs -o "$DIR/$NAME.%(ext)s" $URL
+   for f in "$DIR/$NAME".*; do touch "$DIR/$NAME.${f#*.}" -r "$DIR/$NAME.mp4"; done;
+
+   # unknown problems with FFMPEG, so operate from write dir
+   cd "$DIR"
+   if [ -s "$NAME.en.srt" ] # an srt file already exists
+   then
+      echo "A file of the pattern “$NAME.en.srt” already exists; SRT translation need not occur"
+      echo "Script finishes here"
+      ls -Altr $NAME.*.srt
+      exit 0
+   fi
+
+   if [ ! -s "$NAME.en.$EXT" ] # no such non-zero-byte file exists
+   then
+      echo "No file of the pattern “$NAME.en.$EXT” exists; script cannot download subtitle/captions"
+      exit $NOTFOUND
+   else
+      for f in $NAME.*.$EXT; do $FFMPEG -i $f ${f%.$EXT}.srt; $TOUCH ${f%.$EXT}.srt -r "$NAME.mp4"; done;
+      ls -Altr $NAME.*.srt
+   fi
+   # return to original dir
+   cd -
+else #if [[ $MP == 'mp4' ]]
+   # m4a audio file saved; convert to mp3
+	echo "Please wait… converting .m4a to .mp3…"
+	FILE="$DIR/$NAME.$MP"
+	if $FFMPEG -i "$FILE" "$DIR/$NAME.mp3"
+	then
+	   $TOUCH "$DIR/$NAME.mp3" -r $FILE
+#	   rm -f $FILE
+	else
+	   echo $ERR_COL; echo -n "Error producing mp3 from $FILE; "; $RESET_COL; echo "exiting…"
+		exit 1
+	fi
+fi
+
+exit 0
