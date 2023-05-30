@@ -4,7 +4,7 @@ A BASH Script to Download mp4, poster-image + captions for YT videos
 ## *Basics*
 This script file is designed for use by any-user (no root access required) within a Terminal. It’s principal purpose is to make it easy & reliable to download video, poster + captions for a desired YT video. It has been used under *Devuan* (a systemD-free version of *Debian*). In addition to BASH, the main utilities required are common items such as FFMPEG & TOUCH + the uncommon item YAD (*“Yet Another Dialog”*, described as a *“tool for creating graphical dialogs from shell scripts”*) + FIREFOX.
 
-The main item to change is line 64 (change to a sitable directory):
+The main item to change is line 64 (change to a suitable directory):
 
 ```bash
 if [[ ! "$DIR" ]]
@@ -30,5 +30,9 @@ If the file is opened without any parameters, this is the dialog that you will s
 
 (you forgot to change line#64, did you not?)
 
-Choosing now one of my videos (at https://youtu.be/9RLe2vDv6s0) & filling in the blanks gives the second dialog:
+Choosing now one of my videos (at https://youtu.be/9RLe2vDv6s0, unfortunately very low resolution screen), filling in the blanks & pressing ‘OK’ gives the second dialog:
 
+![dialog2](https://github.com/alexkemp9/Get-YT/blob/main/Screenshot_2023-05-30_17-40-17.png)
+
+That has tick-boxes to the left of the screen. To get Audio tick the m4a line, then choose the video resolution that you want, and when complete press ‘OK’. The Audio (if chosen) + video files will be downloaded then combined. Next will be the best-res poster and then captions. It could be scores & scores of files, so choose a single directory
+.
